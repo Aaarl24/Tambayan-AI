@@ -236,7 +236,6 @@ export default function App(): React.JSX.Element {
           frameProcessor={frameProcessor}
           pixelFormat="yuv"
           resizeMode="cover"
-          fps={30}
         />
         <Canvas style={StyleSheet.absoluteFill} pointerEvents="none">
           {boxes.map((b, i) => (
