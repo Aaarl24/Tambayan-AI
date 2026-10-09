@@ -2,8 +2,8 @@
 
 On-device seat-detection camera app. VisionCamera frame processor -> resize
 plugin -> TFLite (SSD MobileNet) inference -> Skia bounding-box overlay, plus a
-small telemetry dashboard. All vision inference runs on-device; only a ~100-byte
-JSON count payload is POSTed to the sync endpoint.
+small telemetry dashboard. All vision inference runs on-device; only a
+~100-byte JSON count payload is POSTed to the sync endpoint.
 
 ## Prerequisites
 
@@ -34,13 +34,15 @@ EXPO_PUBLIC_SYNC_URL=http://<your-pc-ip>:3000/sync
 ## Install the development build
 
 1. Build once on EAS (requires the `axonee` Expo account):
+
    ```bash
    npx eas-cli build --profile development --platform android
    npx eas-cli build --profile development --platform ios
    ```
+
 2. Android: open the build link from `eas build` output (or
-   https://expo.dev/accounts/axonee/projects/tambay-ai/builds) on the device and
-   install the APK.
+   <https://expo.dev/accounts/axonee/projects/tambay-ai/builds>) on the device
+   and install the APK.
 3. iOS: register the device first (`npx eas-cli device:create`), then install
    via the build link. Developer Mode must be enabled on the device
    (Settings -> Privacy & Security -> Developer Mode).
@@ -64,14 +66,17 @@ Some changes only need `git pull` + a Metro reload; others need a **new EAS
 build and a reinstall** on every device.
 
 Needs a new native build:
+
 - `app.json` native keys: `ios.bundleIdentifier`, `android.package`,
   permissions, `ios.infoPlist`
-- Config plugin options (`react-native-vision-camera`, `react-native-fast-tflite`,
-  `expo-build-properties`, e.g. `minSdkVersion`, `usesCleartextTraffic`)
+- Config plugin options (`react-native-vision-camera`,
+  `react-native-fast-tflite`, `expo-build-properties`, e.g. `minSdkVersion`,
+  `usesCleartextTraffic`)
 - Adding/upgrading a package with native code
 - `eas.json` profile changes (affect the next build only)
 
 JS-only (no rebuild):
+
 - `App.tsx`, `src/**` code changes
 - `.env` `EXPO_PUBLIC_*` values
 - `babel.config.js`, `tailwind.config.js`, `metro.config.js`, styles
