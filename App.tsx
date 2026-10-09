@@ -1,7 +1,7 @@
 // App.tsx
 import './global.css';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
+import { AppState, StyleSheet, Text, View, type LayoutChangeEvent } from 'react-native';
 import {
   Camera,
   runAsync,
@@ -69,13 +69,20 @@ export default function App(): React.JSX.Element {
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice('back');
 
+  // Stop the camera when the app is backgrounded (battery + privacy).
+  const [appActive, setAppActive] = useState(AppState.currentState === 'active');
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => setAppActive(state === 'active'));
+    return () => sub.remove();
+  }, []);
+
   useEffect(() => {
     if (!hasPermission) {
       void requestPermission();
     }
   }, [hasPermission, requestPermission]);
 
-  const plugin = useTensorflowModel(require('./assets/ssd_mobilenet_v1.tflite'));
+  const plugin = useTensorflowModel(require('./assets/ssd_mobilenet_v1.tflite'), []);
   const model = plugin.state === 'loaded' ? plugin.model : undefined;
   const { resize } = useResizePlugin();
 
@@ -225,7 +232,7 @@ export default function App(): React.JSX.Element {
         <Camera
           style={StyleSheet.absoluteFill}
           device={device}
-          isActive
+          isActive={appActive}
           frameProcessor={frameProcessor}
           pixelFormat="yuv"
           resizeMode="cover"

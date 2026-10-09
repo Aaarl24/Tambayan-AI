@@ -6,6 +6,10 @@ module.exports = function (api) {
       'nativewind/babel',
     ],
     // Required so the frame processor's 'worklet' functions work
-    plugins: ['react-native-worklets-core/plugin'],
+    plugins: [
+      'react-native-worklets-core/plugin',
+      // Required by Reanimated 4; must be listed last
+      'react-native-worklets/plugin',
+    ],
   };
 };
