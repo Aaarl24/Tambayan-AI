@@ -75,7 +75,7 @@ export default function App(): React.JSX.Element {
     }
   }, [hasPermission, requestPermission]);
 
-  const plugin = useTensorflowModel(require('./assets/ssd_mobilenet_v1.tflite'));
+  const plugin = useTensorflowModel(require('./assets/ssd_mobilenet_v1.tflite'), []);
   const model = plugin.state === 'loaded' ? plugin.model : undefined;
   const { resize } = useResizePlugin();
 
