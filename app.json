@@ -5,8 +5,16 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
+    "owner": "axonee",
+    "ios": {
+      "bundleIdentifier": "com.axonee.tambayai",
+      "supportsTablet": true,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
     "android": {
-      "package": "com.yourname.tambayai",
+      "package": "com.axonee.tambayai",
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.INTERNET"
