@@ -23,3 +23,10 @@ export const MAX_PAYLOAD_BYTES = 100;
  */
 export const API_URL: string =
   process.env.EXPO_PUBLIC_API_URL ?? SYNC_URL.replace(/\/sync\/?$/, '');
+
+/**
+ * Student-mode WebView target (the server's `/` page).
+ * Default reaches the host PC from an Android emulator; set
+ * EXPO_PUBLIC_VIEWER_URL=http://<pc-ip>:3000 for physical devices.
+ */
+export const VIEWER_URL: string = process.env.EXPO_PUBLIC_VIEWER_URL ?? 'http://10.0.2.2:3000';
