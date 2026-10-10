@@ -195,11 +195,7 @@ function createServer() {
       const now = Date.now();
       return json(res, 200, {
         generatedAt: now,
-        cafes: cafes.map((c) => {
-          const { branch, ...rest } = c;
-          void branch;
-          return { ...rest, live: liveFor(c.branch, now) };
-        }),
+        cafes: cafes.map((c) => ({ ...c, live: liveFor(c.branch, now) })),
       });
     }
 
