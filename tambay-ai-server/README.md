@@ -23,7 +23,24 @@ Then open <http://localhost:3000> — the map shows demo cafes updating live.
 | GET    | `/api/availability` | Raw latest readings per branch (legacy, used by old viewers) |
 | GET    | `/api/status`       | Alias of `/api/availability`                        |
 | GET    | `/api/stream`       | SSE — pushes instantly on every `/sync`             |
+| GET    | `/api/config`       | Map tile URL + attribution for the web app          |
 | GET    | `/`                 | Student web app (`public/`)                         |
+
+## Map tiles
+
+The student map uses OpenStreetMap tiles. The tile URL is configurable —
+set `TILE_URL` before `npm start` to swap providers (e.g. a self-hosted
+tile server on venue Wi-Fi):
+
+```powershell
+$env:TILE_URL="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"; npm start
+```
+
+**Note:** the public OSM tile servers have a
+[usage policy](https://operations.osmfoundation.org/policies/tiles/) —
+fine for a demo, but heavy production traffic needs your own tile host.
+Leaflet and fonts are vendored in `public/vendor` and `public/fonts`
+(committed — no CDN needed at runtime, works on flaky Wi-Fi).
 
 ## Wiring the Cafe Console (phone app) to it
 

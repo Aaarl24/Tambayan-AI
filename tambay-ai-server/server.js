@@ -181,6 +181,15 @@ function createServer() {
       });
     }
 
+    // --- client config: tile URL is env-configurable (TILE_URL) so the
+    //     map provider can be swapped without touching the app ---
+    if (req.method === 'GET' && url.pathname === '/api/config') {
+      return json(res, 200, {
+        tileUrl: process.env.TILE_URL || 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      });
+    }
+
     // --- student API: registry joined with latest readings ---
     if (req.method === 'GET' && url.pathname === '/api/cafes') {
       const now = Date.now();
