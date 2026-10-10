@@ -48,9 +48,13 @@ function fakeGrid(s) {
   for (let i = 0; i < seatCells; i++) cells[i] = 1;
   const taken = Math.round(seatCells * (1 - s.vacancyBias));
   for (let i = 0; i < taken && i < seatCells; i++) cells[i] = 2;
-  let bits = 0;
-  for (const v of cells) bits = (bits << 2) | v;
-  return bits.toString(16).padStart(8, '0');
+  let hex = '';
+  for (let i = 0; i < 16; i += 4) {
+    let byte = 0;
+    for (let j = 0; j < 4; j++) byte = (byte << 2) | cells[i + j];
+    hex += byte.toString(16).padStart(2, '0');
+  }
+  return hex;
 }
 
 async function post(branch, counts, extras) {

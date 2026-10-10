@@ -149,9 +149,15 @@ export function seatGridHex(detections: Detection[]): string {
     }
   }
   for (const p of persons) cells[cellOf(p)] = 2; // person => taken
-  let bits = 0;
-  for (let i = 0; i < cells.length; i++) bits = (bits << 2) | cells[i];
-  return bits.toString(16).padStart(8, '0');
+  // Pack 4 cells (8 bits) per hex byte — 32 bits total would overflow a
+  // signed int32 if shifted all at once, so go byte-by-byte.
+  let hex = '';
+  for (let i = 0; i < cells.length; i += 4) {
+    let byte = 0;
+    for (let j = 0; j < 4; j++) byte = (byte << 2) | cells[i + j];
+    hex += byte.toString(16).padStart(2, '0');
+  }
+  return hex;
 }
 
 /**
