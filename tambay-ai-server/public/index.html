@@ -2,119 +2,39 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Tambay-AI — Seat Availability</title>
-<style>
-  :root { color-scheme: dark; }
-  * { box-sizing: border-box; margin: 0; }
-  body {
-    font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
-    background: #0f172a; color: #e2e8f0; min-height: 100vh; padding: 20px;
-  }
-  header { text-align: center; margin-bottom: 24px; }
-  h1 { font-size: 1.5rem; font-weight: 800; }
-  .sub { color: #64748b; font-size: 0.8rem; margin-top: 4px; }
-  .live { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
-    background: #10b981; margin-right: 6px; }
-  .live.off { background: #f43f5e; }
-  #grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    max-width: 960px; margin: 0 auto; }
-  .card { background: #1e293b; border-radius: 16px; padding: 20px; }
-  .card.stale { opacity: 0.45; }
-  .branch { font-weight: 700; display: flex; justify-content: space-between; }
-  .ago { color: #64748b; font-size: 0.75rem; font-weight: 400; }
-  .avail { margin: 12px 0; font-weight: 800; font-size: 1.1rem; }
-  .stats { display: flex; gap: 10px; }
-  .stat { flex: 1; text-align: center; background: #0f172a; border-radius: 12px; padding: 12px 4px; }
-  .stat b { font-size: 2rem; display: block; }
-  .stat span { font-size: 0.65rem; text-transform: uppercase; color: #94a3b8; letter-spacing: 0.05em; }
-  .v { color: #10b981; } .o { color: #f59e0b; } .l { color: #06b6d4; }
-  .empty { text-align: center; color: #475569; padding: 60px 20px; grid-column: 1 / -1; }
-  .bar { height: 6px; background: #334155; border-radius: 3px; margin-top: 14px; overflow: hidden; }
-  .bar i { display: block; height: 100%; background: #f59e0b; transition: width 0.4s; }
-</style>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Tambay-AI — Know before you walk</title>
+<link rel="stylesheet" href="vendor/leaflet.css" />
+<link rel="stylesheet" href="style.css" />
 </head>
 <body>
-<header>
-  <h1>Tambay-AI</h1>
-  <div class="sub"><span class="live" id="liveDot"></span>Live seat availability · on-device AI, no images leave the device</div>
-</header>
-<div id="grid"><div class="empty">Waiting for a sensor node to report…</div></div>
+<div id="map" role="application" aria-label="Cafe availability map"></div>
 
-<script>
-const grid = document.getElementById('grid');
-const liveDot = document.getElementById('liveDot');
-const state = new Map(); // branch -> entry
-let staleAfterMs = 120000;
-let serverOffset = 0;
+<div id="connBanner" role="status"></div>
+<div id="demoBadge">Demo data</div>
 
-const AVAIL = [
-  ['none',      'No seats in view', '#94a3b8'],
-  ['available', 'Seats available',  '#10b981'],
-  ['filling',   'Filling up',       '#f59e0b'],
-  ['full',      'Full',             '#f43f5e'],
-];
+<div id="topbar">
+  <div id="toprow">
+    <div id="brand"><span id="brandName">Tambay-AI</span><span id="tagline"></span></div>
+    <div id="spacer"></div>
+    <button class="pillbtn" id="langBtn" aria-label="switch language">FIL</button>
+    <button class="pillbtn" id="locBtn"></button>
+    <button class="pillbtn" id="findBtn"></button>
+  </div>
+  <div id="chips" role="group" aria-label="filters"></div>
+</div>
 
-function derive(e) {
-  const total = e.vacant + e.occupied;
-  const pct = total ? Math.round((e.occupied / total) * 100) : 0;
-  const avail = total === 0 ? AVAIL[0] : e.vacant === 0 ? AVAIL[3] : pct >= 75 ? AVAIL[2] : AVAIL[1];
-  return { total, pct, label: avail[1], color: avail[2] };
-}
+<div id="empty"><h2 id="emptyTitle"></h2><p id="emptyBody"></p></div>
 
-function ago(ms) {
-  const s = Math.max(0, Math.round(ms / 1000));
-  return s < 60 ? `${s}s ago` : `${Math.floor(s / 60)}m ago`;
-}
+<div id="sheet">
+  <div id="grab" role="slider" tabindex="0" aria-label="bottom sheet" aria-orientation="vertical"></div>
+  <div id="sheetBody"></div>
+</div>
 
-function render() {
-  const now = Date.now() + serverOffset;
-  const entries = [...state.values()];
-  if (!entries.length) {
-    grid.innerHTML = '<div class="empty">Waiting for a sensor node to report…</div>';
-    return;
-  }
-  grid.innerHTML = entries.map((e) => {
-    const d = derive(e);
-    const stale = now - e.at > staleAfterMs;
-    return `<div class="card ${stale ? 'stale' : ''}">
-      <div class="branch">${e.branch}<span class="ago">${stale ? 'offline' : ago(now - e.at)}</span></div>
-      <div class="avail" style="color:${d.color}">${stale ? 'No recent data' : d.label}${d.total ? ` · ${d.pct}% full` : ''}</div>
-      <div class="stats">
-        <div class="stat"><b class="v">${e.vacant}</b><span>Vacant</span></div>
-        <div class="stat"><b class="o">${e.occupied}</b><span>Occupied</span></div>
-        <div class="stat"><b class="l">${e.laptops}</b><span>Laptops</span></div>
-      </div>
-      <div class="bar"><i style="width:${d.pct}%"></i></div>
-    </div>`;
-  }).join('');
-}
+<div id="toast" role="status" aria-live="polite"></div>
 
-async function poll() {
-  try {
-    const r = await fetch('/api/status');
-    const d = await r.json();
-    staleAfterMs = d.staleAfterMs;
-    serverOffset = d.serverTime - Date.now();
-    d.branches.forEach((b) => state.set(b.branch, b));
-    liveDot.className = 'live';
-    render();
-  } catch { liveDot.className = 'live off'; }
-}
-
-// Live push: instant update when a sensor reports
-const es = new EventSource('/api/events');
-es.onmessage = (ev) => {
-  const e = JSON.parse(ev.data);
-  state.set(e.branch, e);
-  liveDot.className = 'live';
-  render();
-};
-es.onerror = () => { liveDot.className = 'live off'; };
-
-poll();
-setInterval(poll, 10000);   // fallback + keeps "Xs ago" fresh
-setInterval(render, 5000);  // re-render age labels
-</script>
+<script src="vendor/leaflet.js"></script>
+<script src="i18n.js"></script>
+<script src="app.js"></script>
 </body>
 </html>
