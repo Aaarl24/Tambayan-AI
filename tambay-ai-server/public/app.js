@@ -162,6 +162,13 @@ const pulseSet = new Set();
 // OSRM's free demo endpoint provides the walking path; a straight dashed
 // line + time estimate is the offline fallback. No API key involved.
 let routeLayer = null;
+const ROUTE_MODES = [
+  { id: 'walk', icon: '🚶', osrm: 'foot', kmh: 4.5 },
+  { id: 'bike', icon: '🚲', osrm: 'cycling', kmh: 15 },
+  { id: 'car', icon: '🚗', osrm: 'driving', kmh: 25 },
+  { id: 'transit', icon: '🚆', osrm: null, kmh: 30 }, // no transit routing on OSRM — estimate only
+];
+state.routeMode = 'walk';
 function clearRoute() {
   if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
   el('routeChip').classList.remove('show');
@@ -184,28 +191,35 @@ function locate() {
     );
   });
 }
+async function routeFetch(mode, from, to) {
+  // OSRM's public demo hosts the 'driving' graph; foot/cycling may 400.
+  // Try the requested profile, then fall back to driving before the
+  // straight-line estimate — honest degradation, still in-app.
+  const profiles = mode.osrm ? [mode.osrm, 'driving'] : [];
+  for (const p of profiles) {
+    try {
+      const r = await fetch(
+        `https://router.project-osrm.org/route/v1/${p}/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson`
+      );
+      const j = await r.json();
+      const route = j.routes && j.routes[0];
+      if (route) return { coords: route.geometry.coordinates.map(([lng, lat]) => [lat, lng]), dist: route.distance, secs: route.duration };
+    } catch { /* try next profile */ }
+  }
+  return null;
+}
 async function startDirections(c) {
+  state.routeCafe = c;
   let ok = !!state.userLoc;
   if (!ok) { toast(t('locatingYou')); ok = await locate(); renderAll(); }
   if (!ok) { toast(t('locationNeeded')); selectCafe(c.id, true); return; }
+  const mode = ROUTE_MODES.find((m) => m.id === state.routeMode) || ROUTE_MODES[0];
   clearRoute();
-  let coords = null, dist = null, secs = null;
-  try {
-    const r = await fetch(
-      `https://router.project-osrm.org/route/v1/foot/${state.userLoc.lng},${state.userLoc.lat};${c.lng},${c.lat}?overview=full&geometries=geojson`
-    );
-    const j = await r.json();
-    const route = j.routes && j.routes[0];
-    if (route) {
-      coords = route.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
-      dist = route.distance; secs = route.duration;
-    }
-  } catch { /* offline — straight-line fallback below */ }
-  const dashed = !coords;
-  if (!coords) {
-    coords = [[state.userLoc.lat, state.userLoc.lng], [c.lat, c.lng]];
-    dist = distM(c); secs = (dist / 1000 / WALK_KMH) * 3600;
-  }
+  const routed = await routeFetch(mode, state.userLoc, c);
+  const dashed = !routed;
+  const coords = routed ? routed.coords : [[state.userLoc.lat, state.userLoc.lng], [c.lat, c.lng]];
+  const dist = routed ? routed.dist : distM(c);
+  const secs = routed ? routed.secs : (dist / 1000 / mode.kmh) * 3600;
   routeLayer = L.polyline(coords, {
     color: '#0891b2', weight: 5, opacity: 0.9,
     ...(dashed ? { dashArray: '6 9' } : {}),
@@ -213,8 +227,14 @@ async function startDirections(c) {
   const mins = Math.max(1, Math.round(secs / 60));
   const km = dist >= 1000 ? `${(dist / 1000).toFixed(1)} km` : `${Math.round(dist)} m`;
   const chip = el('routeChip');
-  chip.innerHTML = `<span class="eta">~${mins} ${t('walkEst')}</span><span>${km} → ${esc(c.name)}</span><button id="routeClear" aria-label="${t('close')}">✕</button>`;
+  chip.innerHTML =
+    `<div class="modes">` +
+    ROUTE_MODES.map((m) => `<button class="mode ${m.id === mode.id ? 'on' : ''}" data-mode="${m.id}" aria-label="${m.id}">${m.icon}</button>`).join('') +
+    `</div><span class="eta">~${mins} min</span><span>${km} → ${esc(c.name)}${dashed ? ' (est.)' : ''}</span><button id="routeClear" aria-label="${t('close')}">✕</button>`;
   chip.classList.add('show');
+  chip.querySelectorAll('[data-mode]').forEach((b) => {
+    b.onclick = () => { state.routeMode = b.dataset.mode; void startDirections(state.routeCafe); };
+  });
   el('routeClear').onclick = clearRoute;
   map.fitBounds(routeLayer.getBounds().pad(0.25));
   setSnap('peek');

@@ -200,6 +200,9 @@ button { font: inherit; cursor: pointer; }
   border: none; background: var(--card-2); color: var(--ink);
   border-radius: 999px; width: 26px; height: 26px; font-weight: 700;
 }
+#routeChip .modes { display: flex; gap: 2px; }
+#routeChip .mode { width: 30px; height: 26px; font-size: .85rem; background: transparent; }
+#routeChip .mode.on { background: var(--laptop); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
