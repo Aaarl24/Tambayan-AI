@@ -185,6 +185,25 @@ button { font: inherit; cursor: pointer; }
 
 .loc-marker { background: var(--laptop); border: 3px solid #fff; border-radius: 50%; width: 16px; height: 16px; box-shadow: 0 0 0 3px rgba(8,145,178,.35); }
 
+/* walking route chip shown while directions are active */
+#routeChip {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  top: max(64px, calc(env(safe-area-inset-top) + 56px)); z-index: 12;
+  display: none; align-items: center; gap: 8px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 999px;
+  padding: 8px 8px 8px 14px; font-size: .82rem; font-weight: 600;
+  box-shadow: 0 4px 14px rgba(0,0,0,.18); white-space: nowrap; max-width: 92vw;
+}
+#routeChip.show { display: flex; }
+#routeChip .eta { color: var(--laptop); font-weight: 800; }
+#routeChip button {
+  border: none; background: var(--card-2); color: var(--ink);
+  border-radius: 999px; width: 26px; height: 26px; font-weight: 700;
+}
+#routeChip .modes { display: flex; gap: 2px; }
+#routeChip .mode { width: 30px; height: 26px; font-size: .85rem; background: transparent; }
+#routeChip .mode.on { background: var(--laptop); }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }

@@ -36,13 +36,15 @@ function statusLabel(s) {
   return { available: t('statusAvailable'), filling: t('statusFilling'), full: t('statusFull'),
     offline: t('statusOffline'), notlive: t('statusNotLive'), none: t('statusFull') }[s] || s;
 }
-function distM(c) {
-  if (!state.userLoc) return null;
-  const [a, b] = [state.userLoc, c];
+function hav(a, b) {
   const R = 6371000, rad = Math.PI / 180;
   const dLat = (b.lat - a.lat) * rad, dLng = (b.lng - a.lng) * rad;
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(h));
+}
+function distM(c) {
+  if (!state.userLoc) return null;
+  return hav(state.userLoc, c);
 }
 function walkMin(c) { const d = distM(c); return d == null ? null : Math.max(1, Math.round((d / 1000 / WALK_KMH) * 60)); }
 
@@ -157,9 +159,187 @@ function renderPins() {
 }
 const pulseSet = new Set();
 
+// ---------- in-app walking directions ----------
+// Route layer drawn on the map itself — the student never leaves Tambay.
+// OSRM's free demo endpoint provides the walking path; a straight dashed
+// line + time estimate is the offline fallback. No API key involved.
+let routeLayer = null;
+const ROUTE_MODES = [
+  { id: 'walk', icon: '🚶', costing: 'pedestrian', kmh: 4.5, color: '#0891b2' },
+  // Maximum safety bias: use_roads 0 = avoid shared arterial roads wherever
+  // ANY quieter alternative exists; living streets preferred; commuter pace.
+  { id: 'bike', icon: '🚲', costing: 'bicycle', kmh: 15, color: '#10b981',
+    costingOptions: { bicycle: { bicycle_type: 'Hybrid', use_roads: 0, use_living_streets: 1, cycling_speed: 15 } } },
+  { id: 'car', icon: '🚗', costing: 'auto', kmh: 25, color: '#f59e0b' },
+  { id: 'transit', icon: '🚆', costing: null, kmh: 4.5, color: '#8b5cf6' },
+];
+// LRT-1 stations along the Taft Ave corridor (approx coords, N -> S).
+// Transit mode = walk to nearest station -> ride the line -> walk to cafe.
+const LRT1 = [
+  [14.6185, 120.9813], // Carriedo
+  [14.5928, 120.9816], // Central Terminal
+  [14.5824, 120.9845], // United Nations
+  [14.5766, 120.9881], // Pedro Gil
+  [14.5701, 120.9916], // Quirino
+  [14.5634, 120.9947], // Vito Cruz
+  [14.5543, 120.9970], // Gil Puyat
+  [14.5478, 120.9986], // Libertad
+];
+const RAIL_KMH = 40, BOARDING_S = 150;
+function nearestStation(p) {
+  let bi = 0, bd = Infinity;
+  LRT1.forEach(([lat, lng], i) => { const d = hav(p, { lat, lng }); if (d < bd) { bd = d; bi = i; } });
+  return { i: bi, dist: bd };
+}
+// Rail-assisted route: walk -> LRT-1 -> walk. Returns null when riding the
+// line makes no sense (same station for origin and destination).
+async function transitRoute(from, c) {
+  const s1 = nearestStation(from), s2 = nearestStation(c);
+  if (s1.i === s2.i) return null;
+  const st1 = { lat: LRT1[s1.i][0], lng: LRT1[s1.i][1] };
+  const st2 = { lat: LRT1[s2.i][0], lng: LRT1[s2.i][1] };
+  const walk = ROUTE_MODES[0];
+  const legA = await routeFetch(walk, from, st1);
+  const legB = await routeFetch(walk, st2, c);
+  const legACoords = legA ? legA.coords : [[from.lat, from.lng], [st1.lat, st1.lng]];
+  const legBCoords = legB ? legB.coords : [[st2.lat, st2.lng], [c.lat, c.lng]];
+  const legADist = legA ? legA.dist : s1.dist;
+  const legBDist = legB ? legB.dist : s2.dist;
+  const [lo, hi] = s1.i < s2.i ? [s1.i, s2.i] : [s2.i, s1.i];
+  let railPts = LRT1.slice(lo, hi + 1).map(([lat, lng]) => [lat, lng]);
+  if (s1.i > s2.i) railPts = railPts.reverse();
+  const railDist = railPts.slice(1).reduce((d, p, i) => d + hav({ lat: railPts[i][0], lng: railPts[i][1] }, { lat: p[0], lng: p[1] }), 0);
+  const walkSecs = ((legADist + legBDist) / 1000 / ROUTE_MODES[0].kmh) * 3600;
+  return {
+    legs: [legACoords, railPts, legBCoords],
+    dist: legADist + railDist + legBDist,
+    secs: walkSecs + (railDist / 1000 / RAIL_KMH) * 3600 + BOARDING_S,
+    via: 'LRT-1',
+  };
+}
+state.routeMode = 'walk';
+function clearRoute() {
+  if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
+  el('routeChip').classList.remove('show');
+}
+function locate() {
+  return new Promise((res) => {
+    navigator.geolocation?.getCurrentPosition(
+      (p) => {
+        state.userLoc = { lat: p.coords.latitude, lng: p.coords.longitude };
+        if (!userMarker) {
+          userMarker = L.marker([p.coords.latitude, p.coords.longitude], {
+            icon: L.divIcon({ className: '', html: '<div class="loc-marker"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }),
+            interactive: false,
+          }).addTo(map);
+        } else userMarker.setLatLng([p.coords.latitude, p.coords.longitude]);
+        res(true);
+      },
+      () => res(false),
+      { timeout: 8000 }
+    );
+  });
+}
+// Valhalla encoded-polyline decoder (precision 6)
+function decodeShape(str) {
+  const out = []; let i = 0, lat = 0, lng = 0;
+  while (i < str.length) {
+    let r = 0, shift = 0, b;
+    do { b = str.charCodeAt(i++) - 63; r |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lat += (r & 1) ? ~(r >> 1) : r >> 1;
+    r = 0; shift = 0;
+    do { b = str.charCodeAt(i++) - 63; r |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lng += (r & 1) ? ~(r >> 1) : r >> 1;
+    out.push([lat / 1e6, lng / 1e6]);
+  }
+  return out;
+}
+// Valhalla public demo server — free, no key, real pedestrian/bicycle/auto
+// costings (OSRM's demo only routes cars, which made "walk" detour on
+// one-way streets). Returns null on any failure so callers can fall back
+// to a straight-line estimate.
+async function routeFetch(mode, from, to) {
+  try {
+    const res = await fetch('https://valhalla1.openstreetmap.de/route', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        locations: [{ lat: from.lat, lon: from.lng }, { lat: to.lat, lon: to.lng }],
+        costing: mode.costing || 'pedestrian',
+        units: 'kilometers',
+        ...(mode.costingOptions ? { costing_options: mode.costingOptions } : {}),
+      }),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data.trip?.legs?.length) return null;
+    return {
+      coords: data.trip.legs.flatMap((leg) => decodeShape(leg.shape)),
+      dist: data.trip.summary.length * 1000,
+      secs: data.trip.summary.time,
+    };
+  } catch { return null; }
+}
+async function startDirections(c) {
+  state.routeCafe = c;
+  let ok = !!state.userLoc;
+  if (!ok) { toast(t('locatingYou')); ok = await locate(); renderAll(); }
+  if (!ok) { toast(t('locationNeeded')); selectCafe(c.id, true); return; }
+  const mode = ROUTE_MODES.find((m) => m.id === state.routeMode) || ROUTE_MODES[0];
+  clearRoute();
+  let dist, secs, via = '', estimated = false;
+  if (mode.id === 'transit') {
+    const tr = await transitRoute(state.userLoc, c);
+    if (tr) {
+      const [a, rail, b] = tr.legs;
+      routeLayer = L.layerGroup([
+        L.polyline(a, { color: '#0891b2', weight: 4, opacity: 0.8, dashArray: '4 8' }),
+        L.polyline(rail, { color: '#8b5cf6', weight: 6, opacity: 0.95 }),
+        L.polyline(b, { color: '#0891b2', weight: 4, opacity: 0.8, dashArray: '4 8' }),
+      ]).addTo(map);
+      dist = tr.dist; secs = tr.secs; via = ` via ${tr.via}`; estimated = true;
+    } else estimated = true;
+  }
+  if (!routeLayer) {
+    const routed = await routeFetch(mode, state.userLoc, c);
+    const dashed = !routed;
+    const coords = routed ? routed.coords : [[state.userLoc.lat, state.userLoc.lng], [c.lat, c.lng]];
+    dist = routed ? routed.dist : distM(c);
+    secs = routed ? routed.secs : (dist / 1000 / mode.kmh) * 3600;
+    estimated = dashed;
+    routeLayer = L.polyline(coords, {
+      color: mode.color, weight: 5, opacity: 0.9,
+      ...(dashed ? { dashArray: '6 9' } : {}),
+    }).addTo(map);
+  }
+  const mins = Math.max(1, Math.round(secs / 60));
+  const km = dist >= 1000 ? `${(dist / 1000).toFixed(1)} km` : `${Math.round(dist)} m`;
+  const chip = el('routeChip');
+  chip.innerHTML =
+    `<div class="modes">` +
+    ROUTE_MODES.map((m) => `<button class="mode ${m.id === mode.id ? 'on' : ''}" data-mode="${m.id}" aria-label="${m.id}">${m.icon}</button>`).join('') +
+    `</div><span class="eta">~${mins} min</span><span>${km}${via} → ${esc(c.name)}${estimated ? ' (est.)' : ''}</span><button id="routeClear" aria-label="${t('close')}">✕</button>`;
+  chip.classList.add('show');
+  chip.querySelectorAll('[data-mode]').forEach((b) => {
+    b.onclick = () => { state.routeMode = b.dataset.mode; void startDirections(state.routeCafe); };
+  });
+  el('routeClear').onclick = clearRoute;
+  map.fitBounds(routeLayer.getBounds().pad(0.25));
+  setSnap('peek');
+}
+
 // ---------- bottom sheet ----------
-const SNAPS = { peek: 168, half: () => innerHeight * 0.55, full: () => innerHeight * 0.92 };
+// Snap heights. "peek" hugs the card's measured height so the minimum is
+// truly minimum; half and full are viewport fractions.
+let peekPx = 170;
+const SNAPS = { peek: () => peekPx, half: () => innerHeight * 0.55, full: () => innerHeight * 0.92 };
 const snapPx = (k) => (typeof SNAPS[k] === 'function' ? SNAPS[k]() : SNAPS[k]);
+function measurePeek() {
+  const grab = el('grab').offsetHeight || 26;
+  peekPx = Math.min(innerHeight * 0.45, Math.max(120, el('sheetBody').scrollHeight + grab));
+  if (state.snap === 'peek') setSnap('peek');
+}
 function setSnap(k) {
   state.snap = k;
   const px = Math.min(snapPx(k), innerHeight - 60);
@@ -170,7 +350,7 @@ function setSnap(k) {
 function initDrag() {
   const grab = el('grab'); let startY = 0, startH = 0, dragging = false;
   const move = (y) => {
-    const h = Math.max(SNAPS.peek, Math.min(innerHeight - 40, startH + (startY - y)));
+    const h = Math.max(snapPx('peek'), Math.min(innerHeight - 40, startH + (startY - y)));
     el('sheet').style.height = h + 'px';
     document.documentElement.style.setProperty('--sheet-h', h + 'px');
     return h;
@@ -242,16 +422,20 @@ function floorplanSvg(c) {
   const fp = c.floorplan;
   if (!fp) return `<p class="honest">${t('honestyNote')}</p>`;
   const l = c.live, s = statusOf(c), color = STATUS_COLOR[s];
+  // Text halo so labels stay readable over shapes; textLength keeps the
+  // "not monitored" note inside narrow zones instead of overflowing.
+  const halo = 'paint-order="stroke" stroke="var(--card-2)" stroke-width="3" stroke-linejoin="round"';
+  const fit = (w) => `textLength="${Math.max(10, w - 8)}" lengthAdjust="spacingAndGlyphs"`;
   const zoneRects = (fp.zones || []).map((z) => {
     const live = z.monitored && l && !l.stale;
-    const label = z.monitored
+    const sub = z.monitored
       ? (live ? `${l.vacant} ${t('free')} · ${l.occupied} ${t('taken')}` : t('zoneMonitored'))
-      : `${z.label} — ${t('zoneNotMonitored')}`;
+      : t('zoneNotMonitored');
     const fill = z.monitored ? color : '#888';
     const dash = z.monitored ? '' : 'stroke-dasharray="4 4" opacity="0.6"';
     return `<rect x="${z.x}" y="${z.y}" width="${z.w}" height="${z.h}" rx="6" fill="${z.monitored ? fill : '#888'}" fill-opacity="${z.monitored ? 0.12 : 0.05}" stroke="${fill}" stroke-width="1.5" ${dash}/>
-      <text x="${z.x + 4}" y="${z.y + 12}" font-size="6.5" font-weight="700" fill="var(--ink)">${esc(z.label)}</text>
-      <text x="${z.x + 4}" y="${z.y + 21}" font-size="5.5" fill="var(--muted)">${esc(label)}</text>`;
+      <text x="${z.x + 4}" y="${z.y + 10}" font-size="6" font-weight="700" fill="var(--ink)" ${halo} ${fit(z.w)}>${esc(z.label)}</text>
+      <text x="${z.x + 4}" y="${z.y + z.h - 4}" font-size="5.5" fill="var(--muted)" ${halo} ${fit(z.w)}>${esc(sub)}</text>`;
   }).join('');
   const KIND_STYLE = {
     table: 'fill="var(--card-2)" stroke="var(--muted)" rx="3"',
@@ -265,11 +449,27 @@ function floorplanSvg(c) {
   const outlets = (fp.outlets || []).map((o) =>
     `<circle cx="${o.x}" cy="${o.y}" r="2.6" fill="var(--laptop)" stroke="#fff" stroke-width="1"/><text x="${o.x - 1.7}" y="${o.y + 2}" font-size="4" fill="#fff">⚡</text>`
   ).join('');
+  // Phase B: coarse 4x4 seat grid from the sensor (2 bits/cell: 0 none,
+  // 1 free chair, 2 taken). Shaded over monitored zones only.
+  let gridCells = '';
+  if (l && !l.stale && typeof l.grid === 'string' && /^[0-9a-f]{8}$/i.test(l.grid)) {
+    const bits = BigInt('0x' + l.grid);
+    const cells = [];
+    for (let i = 0; i < 16; i++) cells.push(Number((bits >> BigInt(2 * (15 - i))) & 3n));
+    for (const z of fp.zones || []) {
+      if (!z.monitored) continue;
+      for (let cy = 0; cy < 4; cy++) for (let cx = 0; cx < 4; cx++) {
+        const st = cells[cy * 4 + cx];
+        if (!st) continue;
+        gridCells += `<rect x="${z.x + (cx * z.w) / 4}" y="${z.y + (cy * z.h) / 4}" width="${z.w / 4}" height="${z.h / 4}" fill="${st === 1 ? 'var(--free)' : 'var(--full)'}" fill-opacity="0.16"/>`;
+      }
+    }
+  }
   const e = fp.entrance;
   const entrance = e ? `<circle cx="${e.x}" cy="${e.y}" r="3.4" fill="var(--free)" stroke="#fff" stroke-width="1.4"/><text x="${e.x + 5}" y="${e.y + 2}" font-size="6" font-weight="700" fill="var(--free)">IN</text>` : '';
   return `<div>
     <svg viewBox="${fp.viewBox}" style="width:100%;border-radius:12px;background:var(--card-2)" role="img" aria-label="floor plan">
-      ${zoneRects}${shapes}${outlets}${entrance}
+      ${zoneRects}${gridCells}${shapes}${outlets}${entrance}
     </svg>
     ${fp.label ? `<p class="honest">${esc(fp.label)} · ${t('honestyNote')}</p>` : `<p class="honest">${t('honestyNote')}</p>`}
   </div>`;
@@ -300,6 +500,7 @@ function detailHtml(c) {
     <div class="kv"><b>${t('outletsTitle')}</b><span>${bolts(l ? l.outletDemand : 'low')} <span class="row-sub">${l ? t('outlets' + l.outletDemand[0].toUpperCase() + l.outletDemand.slice(1)) : ''}</span></span></div>
     <p class="honest" style="margin-top:2px">${t('outletsNote')}</p>
     <div class="kv"><b>Area</b><span>${esc(c.areaLabel || '—')} <span class="honest">· ${t('zoneMonitored')}</span></span></div>
+    ${l && l.tables !== undefined ? `<div class="kv"><b>Tables</b><span>${l.tables} in view <span class="honest">(experimental)</span></span></div>` : ''}
     <div class="kv"><b>${t('address')}</b><span>${esc(c.address)}</span></div>
     <div class="kv"><b>${t('hours')}</b><span>${esc(c.hours || '—')}</span></div>`;
   const body = state.detailTab === 'floorplan' ? floorplanSvg(c) : info;
@@ -335,6 +536,7 @@ function renderSheet() {
   if (state.snap === 'peek') {
     const c = sel || bestPick();
     body.innerHTML = `<div class="sect">${sel ? esc(sel.name) : t('bestPick')}</div>` + pickCardHtml(c, !sel);
+    requestAnimationFrame(measurePeek);
     return;
   }
   const list = ranked();
@@ -382,13 +584,20 @@ async function poll() {
     state.generatedAt = d.generatedAt;
     state.cafes = d.cafes;
     state.connDown = false;
+    pollFails = 0;
     el('connBanner').classList.remove('show');
     renderAll();
-  } catch {
-    state.connDown = true;
-    el('connBanner').classList.add('show');
+  } catch (err) {
+    console.error('[tambay] poll failed:', err && (err.stack || err.message || err));
+    // Banner only after 2 consecutive failures — one dropped request on
+    // flaky Wi-Fi shouldn't flash a scary strip at the student.
+    if (++pollFails >= 2) {
+      state.connDown = true;
+      el('connBanner').classList.add('show');
+    }
   }
 }
+let pollFails = 0;
 
 // ---------- init ----------
 async function boot() {
@@ -399,17 +608,10 @@ async function boot() {
   el('findBtn').textContent = t('findSeat');
   el('findBtn').onclick = () => { const c = bestPick(); if (c) selectCafe(c.id, true); else toast(t('emptyBody')); };
   el('locBtn').textContent = '📍 ' + t('useMyLocation');
-  el('locBtn').onclick = () => {
-    navigator.geolocation?.getCurrentPosition(
-      (p) => {
-        state.userLoc = { lat: p.coords.latitude, lng: p.coords.longitude };
-        if (!userMarker) { userMarker = L.marker([p.coords.latitude, p.coords.longitude], { icon: L.divIcon({ className: '', html: '<div class="loc-marker"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }), interactive: false }).addTo(map); }
-        else userMarker.setLatLng([p.coords.latitude, p.coords.longitude]);
-        renderAll();
-      },
-      () => toast('Location unavailable'),
-      { timeout: 8000 }
-    );
+  el('locBtn').onclick = async () => {
+    const ok = await locate();
+    if (!ok) toast(t('locationNeeded'));
+    renderAll();
   };
   el('langBtn').textContent = t('langToggle');
   el('langBtn').onclick = () => { window.LANG = window.LANG === 'en' ? 'fil' : 'en'; localStorage.setItem('tambay-lang', window.LANG); location.reload(); };
@@ -425,9 +627,9 @@ async function boot() {
   };
 
   el('sheetBody').addEventListener('click', (e) => {
-    const open = e.target.closest('[data-open]'); if (open) return selectCafe(open.dataset.open);
+    const cardEl = e.target.closest('[data-open]'); if (cardEl) return selectCafe(cardEl.dataset.open);
     const dir = e.target.closest('[data-dir]');
-    if (dir) { const c = state.cafes.find((x) => x.id === dir.dataset.dir); if (c) open(`https://www.google.com/maps/dir/?api=1&destination=${c.lat},${c.lng}&travelmode=walking`, '_blank'); return; }
+    if (dir) { const c = state.cafes.find((x) => x.id === dir.dataset.dir); if (c) void startDirections(c); return; }
     const share = e.target.closest('[data-share]');
     if (share) { const u = `${location.origin}/#/cafe/${share.dataset.share}`; navigator.clipboard?.writeText(u).then(() => toast(t('copied'))); return; }
     const tab = e.target.closest('[data-tab]');

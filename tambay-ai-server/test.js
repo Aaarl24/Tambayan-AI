@@ -66,11 +66,39 @@ test('GET /api/cafes joins the registry with live readings', async () => {
   assert.ok(demo, 'expected at least one demo cafe');
 });
 
+test('accepts optional tables + grid with strict formats', async () => {
+  const ok = await post({ branch: 'Taft Ave', vacant: 1, occupied: 2, laptops: 0, tables: 3, grid: 'a5a5ff00' });
+  assert.equal(ok.status, 200);
+  assert.equal((await post({ branch: 'X', vacant: 1, occupied: 2, laptops: 0, grid: 'zzzzzzzz' })).status, 400);
+  assert.equal((await post({ branch: 'X', vacant: 1, occupied: 2, laptops: 0, grid: 'a5a5ff0' })).status, 400); // 7 chars
+  assert.equal((await post({ branch: 'X', vacant: 1, occupied: 2, laptops: 0, tables: -1 })).status, 400);
+  const cafes = await (await fetch(`${base}/api/cafes`)).json();
+  const real = cafes.cafes.find((c) => c.id === 'taft-ave');
+  assert.equal(real.live.grid, 'a5a5ff00');
+  assert.equal(real.live.tables, 3);
+});
+
 test('payload byte guard: worst-case phone payload stays under 100 bytes', () => {
-  // Same shape as buildPayload() in ../src/cloud.ts: 24-char branch, 3-digit ints.
-  const worst = { branch: 'X'.repeat(24), vacant: 999, occupied: 999, laptops: 999 };
-  assert.ok(
-    JSON.stringify(worst).length < 100,
-    `payload is ${JSON.stringify(worst).length} bytes`
-  );
+  // Mirror of buildPayload() in ../src/cloud.ts: 6 fields, branch shrinks
+  // until the JSON fits. Assert the result is always under 100 bytes.
+  const build = (branchLen, grid, tables) => {
+    let name = 'X'.repeat(24);
+    const make = () => ({
+      branch: name, vacant: 999, occupied: 999, laptops: 999,
+      ...(tables ? { tables: 99 } : {}),
+      ...(grid ? { grid: 'ffffffff' } : {}),
+    });
+    let p = make();
+    while (JSON.stringify(p).length >= 100 && name.length > 1) {
+      name = name.slice(0, -1);
+      p = make();
+    }
+    return p;
+  };
+  for (const grid of [false, true]) {
+    for (const tables of [false, true]) {
+      const p = build(24, grid, tables);
+      assert.ok(JSON.stringify(p).length < 100, `grid=${grid} tables=${tables}: ${JSON.stringify(p).length}B`);
+    }
+  }
 });

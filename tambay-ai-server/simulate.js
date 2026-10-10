@@ -40,12 +40,29 @@ function drift(s) {
   return { vacant, occupied, laptops };
 }
 
-async function post(branch, counts) {
+// Fabricated 4x4 seat grid for demos: mostly "free chair" cells in the
+// top half with a few "taken" — enough to exercise the floor-plan overlay.
+function fakeGrid(s) {
+  const cells = new Array(16).fill(0);
+  const seatCells = 8 + Math.floor(Math.random() * 4);
+  for (let i = 0; i < seatCells; i++) cells[i] = 1;
+  const taken = Math.round(seatCells * (1 - s.vacancyBias));
+  for (let i = 0; i < taken && i < seatCells; i++) cells[i] = 2;
+  let hex = '';
+  for (let i = 0; i < 16; i += 4) {
+    let byte = 0;
+    for (let j = 0; j < 4; j++) byte = (byte << 2) | cells[i + j];
+    hex += byte.toString(16).padStart(2, '0');
+  }
+  return hex;
+}
+
+async function post(branch, counts, extras) {
   try {
     const res = await fetch(SYNC_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ branch, ...counts }),
+      body: JSON.stringify({ branch, ...counts, ...extras }),
     });
     const d = await res.json();
     if (!d.ok) console.log(`[sim] ${branch}: rejected (${d.error || res.status})`);
@@ -62,7 +79,11 @@ async function tick() {
     else if (Math.random() < 0.08) s.vacancyBias = Math.max(0, s.vacancyBias - 0.4);
     else s.vacancyBias += (Math.random() - 0.5) * 0.15;
     s.vacancyBias = Math.max(0.05, Math.min(0.95, s.vacancyBias));
-    await post(c.branch, drift(s));
+    const counts = drift(s);
+    await post(c.branch, counts, {
+      tables: Math.max(0, counts.vacant + counts.occupied >> 2),
+      grid: fakeGrid(s),
+    });
   }
 }
 
