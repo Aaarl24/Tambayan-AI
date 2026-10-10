@@ -242,16 +242,20 @@ function floorplanSvg(c) {
   const fp = c.floorplan;
   if (!fp) return `<p class="honest">${t('honestyNote')}</p>`;
   const l = c.live, s = statusOf(c), color = STATUS_COLOR[s];
+  // Text halo so labels stay readable over shapes; textLength keeps the
+  // "not monitored" note inside narrow zones instead of overflowing.
+  const halo = 'paint-order="stroke" stroke="var(--card-2)" stroke-width="3" stroke-linejoin="round"';
+  const fit = (w) => `textLength="${Math.max(10, w - 8)}" lengthAdjust="spacingAndGlyphs"`;
   const zoneRects = (fp.zones || []).map((z) => {
     const live = z.monitored && l && !l.stale;
-    const label = z.monitored
+    const sub = z.monitored
       ? (live ? `${l.vacant} ${t('free')} · ${l.occupied} ${t('taken')}` : t('zoneMonitored'))
-      : `${z.label} — ${t('zoneNotMonitored')}`;
+      : t('zoneNotMonitored');
     const fill = z.monitored ? color : '#888';
     const dash = z.monitored ? '' : 'stroke-dasharray="4 4" opacity="0.6"';
     return `<rect x="${z.x}" y="${z.y}" width="${z.w}" height="${z.h}" rx="6" fill="${z.monitored ? fill : '#888'}" fill-opacity="${z.monitored ? 0.12 : 0.05}" stroke="${fill}" stroke-width="1.5" ${dash}/>
-      <text x="${z.x + 4}" y="${z.y + 12}" font-size="6.5" font-weight="700" fill="var(--ink)">${esc(z.label)}</text>
-      <text x="${z.x + 4}" y="${z.y + 21}" font-size="5.5" fill="var(--muted)">${esc(label)}</text>`;
+      <text x="${z.x + 4}" y="${z.y + 10}" font-size="6" font-weight="700" fill="var(--ink)" ${halo} ${fit(z.w)}>${esc(z.label)}</text>
+      <text x="${z.x + 4}" y="${z.y + z.h - 4}" font-size="5.5" fill="var(--muted)" ${halo} ${fit(z.w)}>${esc(sub)}</text>`;
   }).join('');
   const KIND_STYLE = {
     table: 'fill="var(--card-2)" stroke="var(--muted)" rx="3"',
@@ -277,7 +281,7 @@ function floorplanSvg(c) {
       for (let cy = 0; cy < 4; cy++) for (let cx = 0; cx < 4; cx++) {
         const st = cells[cy * 4 + cx];
         if (!st) continue;
-        gridCells += `<rect x="${z.x + (cx * z.w) / 4}" y="${z.y + (cy * z.h) / 4}" width="${z.w / 4}" height="${z.h / 4}" fill="${st === 1 ? 'var(--free)' : 'var(--full)'}" fill-opacity="0.22"/>`;
+        gridCells += `<rect x="${z.x + (cx * z.w) / 4}" y="${z.y + (cy * z.h) / 4}" width="${z.w / 4}" height="${z.h / 4}" fill="${st === 1 ? 'var(--free)' : 'var(--full)'}" fill-opacity="0.16"/>`;
       }
     }
   }
