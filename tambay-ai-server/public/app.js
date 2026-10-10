@@ -399,13 +399,20 @@ async function poll() {
     state.generatedAt = d.generatedAt;
     state.cafes = d.cafes;
     state.connDown = false;
+    pollFails = 0;
     el('connBanner').classList.remove('show');
     renderAll();
-  } catch {
-    state.connDown = true;
-    el('connBanner').classList.add('show');
+  } catch (err) {
+    console.error('[tambay] poll failed:', err && (err.stack || err.message || err));
+    // Banner only after 2 consecutive failures — one dropped request on
+    // flaky Wi-Fi shouldn't flash a scary strip at the student.
+    if (++pollFails >= 2) {
+      state.connDown = true;
+      el('connBanner').classList.add('show');
+    }
   }
 }
+let pollFails = 0;
 
 // ---------- init ----------
 async function boot() {
