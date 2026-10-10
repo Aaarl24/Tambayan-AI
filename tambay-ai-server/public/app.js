@@ -165,13 +165,13 @@ const pulseSet = new Set();
 // line + time estimate is the offline fallback. No API key involved.
 let routeLayer = null;
 const ROUTE_MODES = [
-  { id: 'walk', icon: '🚶', costing: 'pedestrian', kmh: 4.5 },
-  // use_roads near 0 = strongly prefer dedicated bike lanes, paths, and
-  // quieter side streets over sharing arterial roads with traffic.
-  { id: 'bike', icon: '🚲', costing: 'bicycle', kmh: 15,
-    costingOptions: { bicycle: { bicycle_type: 'Hybrid', use_roads: 0.1 } } },
-  { id: 'car', icon: '🚗', costing: 'auto', kmh: 25 },
-  { id: 'transit', icon: '🚆', costing: null, kmh: 4.5 },
+  { id: 'walk', icon: '🚶', costing: 'pedestrian', kmh: 4.5, color: '#0891b2' },
+  // Maximum safety bias: use_roads 0 = avoid shared arterial roads wherever
+  // ANY quieter alternative exists; living streets preferred; commuter pace.
+  { id: 'bike', icon: '🚲', costing: 'bicycle', kmh: 15, color: '#10b981',
+    costingOptions: { bicycle: { bicycle_type: 'Hybrid', use_roads: 0, use_living_streets: 1, cycling_speed: 15 } } },
+  { id: 'car', icon: '🚗', costing: 'auto', kmh: 25, color: '#f59e0b' },
+  { id: 'transit', icon: '🚆', costing: null, kmh: 4.5, color: '#8b5cf6' },
 ];
 // LRT-1 stations along the Taft Ave corridor (approx coords, N -> S).
 // Transit mode = walk to nearest station -> ride the line -> walk to cafe.
@@ -309,7 +309,7 @@ async function startDirections(c) {
     secs = routed ? routed.secs : (dist / 1000 / mode.kmh) * 3600;
     estimated = dashed;
     routeLayer = L.polyline(coords, {
-      color: '#0891b2', weight: 5, opacity: 0.9,
+      color: mode.color, weight: 5, opacity: 0.9,
       ...(dashed ? { dashArray: '6 9' } : {}),
     }).addTo(map);
   }
