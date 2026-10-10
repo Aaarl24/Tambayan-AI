@@ -165,10 +165,10 @@ const pulseSet = new Set();
 // line + time estimate is the offline fallback. No API key involved.
 let routeLayer = null;
 const ROUTE_MODES = [
-  { id: 'walk', icon: '🚶', osrm: 'foot', kmh: 4.5 },
-  { id: 'bike', icon: '🚲', osrm: 'cycling', kmh: 15 },
-  { id: 'car', icon: '🚗', osrm: 'driving', kmh: 25 },
-  { id: 'transit', icon: '🚆', osrm: null, kmh: 4.5 },
+  { id: 'walk', icon: '🚶', costing: 'pedestrian', kmh: 4.5 },
+  { id: 'bike', icon: '🚲', costing: 'bicycle', kmh: 15 },
+  { id: 'car', icon: '🚗', costing: 'auto', kmh: 25 },
+  { id: 'transit', icon: '🚆', costing: null, kmh: 4.5 },
 ];
 // LRT-1 stations along the Taft Ave corridor (approx coords, N -> S).
 // Transit mode = walk to nearest station -> ride the line -> walk to cafe.
@@ -195,7 +195,7 @@ async function transitRoute(from, c) {
   if (s1.i === s2.i) return null;
   const st1 = { lat: LRT1[s1.i][0], lng: LRT1[s1.i][1] };
   const st2 = { lat: LRT1[s2.i][0], lng: LRT1[s2.i][1] };
-  const walk = { osrm: 'foot' };
+  const walk = ROUTE_MODES[0];
   const legA = await routeFetch(walk, from, st1);
   const legB = await routeFetch(walk, st2, c);
   const legACoords = legA ? legA.coords : [[from.lat, from.lng], [st1.lat, st1.lng]];
@@ -237,22 +237,45 @@ function locate() {
     );
   });
 }
-async function routeFetch(mode, from, to) {
-  // OSRM's public demo hosts the 'driving' graph; foot/cycling may 400.
-  // Try the requested profile, then fall back to driving before the
-  // straight-line estimate — honest degradation, still in-app.
-  const profiles = mode.osrm ? [mode.osrm, 'driving'] : [];
-  for (const p of profiles) {
-    try {
-      const r = await fetch(
-        `https://router.project-osrm.org/route/v1/${p}/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson`
-      );
-      const j = await r.json();
-      const route = j.routes && j.routes[0];
-      if (route) return { coords: route.geometry.coordinates.map(([lng, lat]) => [lat, lng]), dist: route.distance, secs: route.duration };
-    } catch { /* try next profile */ }
+// Valhalla encoded-polyline decoder (precision 6)
+function decodeShape(str) {
+  const out = []; let i = 0, lat = 0, lng = 0;
+  while (i < str.length) {
+    let r = 0, shift = 0, b;
+    do { b = str.charCodeAt(i++) - 63; r |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lat += (r & 1) ? ~(r >> 1) : r >> 1;
+    r = 0; shift = 0;
+    do { b = str.charCodeAt(i++) - 63; r |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
+    lng += (r & 1) ? ~(r >> 1) : r >> 1;
+    out.push([lat / 1e6, lng / 1e6]);
   }
-  return null;
+  return out;
+}
+// Valhalla public demo server — free, no key, real pedestrian/bicycle/auto
+// costings (OSRM's demo only routes cars, which made "walk" detour on
+// one-way streets). Returns null on any failure so callers can fall back
+// to a straight-line estimate.
+async function routeFetch(mode, from, to) {
+  try {
+    const res = await fetch('https://valhalla1.openstreetmap.de/route', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        locations: [{ lat: from.lat, lon: from.lng }, { lat: to.lat, lon: to.lng }],
+        costing: mode.costing || 'pedestrian',
+        units: 'kilometers',
+      }),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data.trip?.legs?.length) return null;
+    return {
+      coords: data.trip.legs.flatMap((leg) => decodeShape(leg.shape)),
+      dist: data.trip.summary.length * 1000,
+      secs: data.trip.summary.time,
+    };
+  } catch { return null; }
 }
 async function startDirections(c) {
   state.routeCafe = c;
