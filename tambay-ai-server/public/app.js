@@ -166,7 +166,10 @@ const pulseSet = new Set();
 let routeLayer = null;
 const ROUTE_MODES = [
   { id: 'walk', icon: '🚶', costing: 'pedestrian', kmh: 4.5 },
-  { id: 'bike', icon: '🚲', costing: 'bicycle', kmh: 15 },
+  // use_roads near 0 = strongly prefer dedicated bike lanes, paths, and
+  // quieter side streets over sharing arterial roads with traffic.
+  { id: 'bike', icon: '🚲', costing: 'bicycle', kmh: 15,
+    costingOptions: { bicycle: { bicycle_type: 'Hybrid', use_roads: 0.1 } } },
   { id: 'car', icon: '🚗', costing: 'auto', kmh: 25 },
   { id: 'transit', icon: '🚆', costing: null, kmh: 4.5 },
 ];
@@ -264,6 +267,7 @@ async function routeFetch(mode, from, to) {
         locations: [{ lat: from.lat, lon: from.lng }, { lat: to.lat, lon: to.lng }],
         costing: mode.costing || 'pedestrian',
         units: 'kilometers',
+        ...(mode.costingOptions ? { costing_options: mode.costingOptions } : {}),
       }),
       signal: AbortSignal.timeout(8000),
     });
