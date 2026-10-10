@@ -36,6 +36,7 @@ import {
   computeCounts,
   mapToScreen,
   parseDetections,
+  seatGridHex,
   type Counts,
   type Detection,
   type ScreenBox,
@@ -81,6 +82,7 @@ function median3(window3: Counts[]): Counts {
     vacant: med(window3.map((c) => c.vacant)),
     occupied: med(window3.map((c) => c.occupied)),
     laptops: med(window3.map((c) => c.laptops)),
+    tables: med(window3.map((c) => c.tables)),
   };
 }
 
@@ -265,6 +267,10 @@ export default function CafeConsole(): React.JSX.Element {
   }, [rawCounts]);
   const telemetry = useMemo(() => deriveTelemetry(counts), [counts]);
 
+  // 4x4 seat grid (8 hex chars) — coarse where-are-the-free-seats hint for
+  // the floor plan. Never an image; see seatGridHex() in detection.ts.
+  const seatGrid = useMemo(() => seatGridHex(oriented), [oriented]);
+
   const boxes = useMemo<ScreenBox[]>(() => {
     if (cameraLayout.width === 0 || cameraLayout.height === 0) return [];
     const project = (d: Detection) =>
@@ -293,6 +299,8 @@ export default function CafeConsole(): React.JSX.Element {
   // 5. Cloud sync (30s, text only) + privacy ledger counters -------------------
   const latestCounts = useRef<Counts>(counts);
   latestCounts.current = counts;
+  const latestGrid = useRef<string>(seatGrid);
+  latestGrid.current = seatGrid;
   const pausedRef = useRef(sharingPaused);
   pausedRef.current = sharingPaused;
   const branchRef = useRef(branch);
@@ -304,7 +312,7 @@ export default function CafeConsole(): React.JSX.Element {
   useEffect(() => {
     const id = setInterval(() => {
       if (pausedRef.current) return;
-      void syncTelemetryToCloud(branchRef.current, latestCounts.current).then((r) => {
+      void syncTelemetryToCloud(branchRef.current, latestCounts.current, latestGrid.current).then((r) => {
         setLastSync(r);
         if (r.ok) {
           setUpdatesSent((n) => n + 1);
@@ -349,6 +357,7 @@ export default function CafeConsole(): React.JSX.Element {
     chair: 'chair',
     person: 'person',
     laptop: 'laptop',
+    table: 'table',
   };
 
   return (
@@ -454,6 +463,9 @@ export default function CafeConsole(): React.JSX.Element {
             </View>
             <Text className="mt-2 text-center text-[11px] text-slate-400">
               Outlet demand: {OUTLET_LABEL[telemetry.outletDemand]} · {branch}
+            </Text>
+            <Text className="mt-0.5 text-center text-[10px] text-slate-500">
+              Tables in view: {counts.tables} (experimental)
             </Text>
           </View>
 

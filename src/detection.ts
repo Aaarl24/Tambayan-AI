@@ -2,7 +2,7 @@
 // Pure helpers for parsing SSD MobileNet v1 output, counting seats, and
 // mapping normalized boxes onto the on-screen camera preview.
 
-export type Label = 'person' | 'chair' | 'laptop';
+export type Label = 'person' | 'chair' | 'laptop' | 'table';
 
 /** Normalized box (0..1) in *portrait* frame space. */
 export interface Detection {
@@ -18,6 +18,8 @@ export interface Counts {
   vacant: number;
   occupied: number;
   laptops: number;
+  /** "dining table" detections — experimental; competes for the 10-slot cap. */
+  tables: number;
 }
 
 export interface ScreenBox {
@@ -44,6 +46,7 @@ export const CLASS_ID_OFFSET = 1;
 const COCO_PERSON = 1;
 const COCO_CHAIR = 62;
 const COCO_LAPTOP = 73;
+const COCO_DINING_TABLE = 67;
 
 export const COLORS = {
   chair: '#10B981', // emerald - vacant chair
@@ -77,6 +80,7 @@ export function parseDetections(
     if (cocoId === COCO_PERSON) label = 'person';
     else if (cocoId === COCO_CHAIR) label = 'chair';
     else if (cocoId === COCO_LAPTOP) label = 'laptop';
+    else if (cocoId === COCO_DINING_TABLE) label = 'table';
     if (label === null) continue;
 
     const ymin = Math.max(0, Math.min(1, boxes[i * 4]));
@@ -117,9 +121,37 @@ export function computeCounts(detections: Detection[]): {
       vacant: vacantChairs.length,
       occupied: persons.length,
       laptops: laptops.length,
+      tables: detections.filter((d) => d.label === 'table').length,
     },
     vacantChairs,
   };
+}
+
+/**
+ * Floor-plan Phase B: compresses the camera view into a 4x4 coarse grid
+ * encoded as 8 hex chars (2 bits per cell: 0 none / 1 free chair / 2 taken).
+ * It is NOT an image and cannot be turned back into one — it only says which
+ * coarse area has a free or taken seat, so the floor plan can shade cells.
+ */
+export const SEAT_GRID_DIM = 4;
+export function seatGridHex(detections: Detection[]): string {
+  const persons = detections.filter((d) => d.label === 'person');
+  const cellOf = (d: Detection) => {
+    const cx = Math.min(SEAT_GRID_DIM - 1, Math.floor((d.x + d.w / 2) * SEAT_GRID_DIM));
+    const cy = Math.min(SEAT_GRID_DIM - 1, Math.floor((d.y + d.h / 2) * SEAT_GRID_DIM));
+    return cy * SEAT_GRID_DIM + cx;
+  };
+  const cells = new Uint8Array(SEAT_GRID_DIM * SEAT_GRID_DIM); // 0 = none
+  for (const d of detections) {
+    if (d.label === 'chair') {
+      const taken = persons.some((p) => overlapRatio(d, p) > OCCUPIED_OVERLAP);
+      cells[cellOf(d)] = taken ? 2 : 1;
+    }
+  }
+  for (const p of persons) cells[cellOf(p)] = 2; // person => taken
+  let bits = 0;
+  for (let i = 0; i < cells.length; i++) bits = (bits << 2) | cells[i];
+  return bits.toString(16).padStart(8, '0');
 }
 
 /**

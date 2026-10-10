@@ -265,11 +265,27 @@ function floorplanSvg(c) {
   const outlets = (fp.outlets || []).map((o) =>
     `<circle cx="${o.x}" cy="${o.y}" r="2.6" fill="var(--laptop)" stroke="#fff" stroke-width="1"/><text x="${o.x - 1.7}" y="${o.y + 2}" font-size="4" fill="#fff">⚡</text>`
   ).join('');
+  // Phase B: coarse 4x4 seat grid from the sensor (2 bits/cell: 0 none,
+  // 1 free chair, 2 taken). Shaded over monitored zones only.
+  let gridCells = '';
+  if (l && !l.stale && typeof l.grid === 'string' && /^[0-9a-f]{8}$/i.test(l.grid)) {
+    const bits = BigInt('0x' + l.grid);
+    const cells = [];
+    for (let i = 0; i < 16; i++) cells.push(Number((bits >> BigInt(2 * (15 - i))) & 3n));
+    for (const z of fp.zones || []) {
+      if (!z.monitored) continue;
+      for (let cy = 0; cy < 4; cy++) for (let cx = 0; cx < 4; cx++) {
+        const st = cells[cy * 4 + cx];
+        if (!st) continue;
+        gridCells += `<rect x="${z.x + (cx * z.w) / 4}" y="${z.y + (cy * z.h) / 4}" width="${z.w / 4}" height="${z.h / 4}" fill="${st === 1 ? 'var(--free)' : 'var(--full)'}" fill-opacity="0.22"/>`;
+      }
+    }
+  }
   const e = fp.entrance;
   const entrance = e ? `<circle cx="${e.x}" cy="${e.y}" r="3.4" fill="var(--free)" stroke="#fff" stroke-width="1.4"/><text x="${e.x + 5}" y="${e.y + 2}" font-size="6" font-weight="700" fill="var(--free)">IN</text>` : '';
   return `<div>
     <svg viewBox="${fp.viewBox}" style="width:100%;border-radius:12px;background:var(--card-2)" role="img" aria-label="floor plan">
-      ${zoneRects}${shapes}${outlets}${entrance}
+      ${zoneRects}${gridCells}${shapes}${outlets}${entrance}
     </svg>
     ${fp.label ? `<p class="honest">${esc(fp.label)} · ${t('honestyNote')}</p>` : `<p class="honest">${t('honestyNote')}</p>`}
   </div>`;
@@ -300,6 +316,7 @@ function detailHtml(c) {
     <div class="kv"><b>${t('outletsTitle')}</b><span>${bolts(l ? l.outletDemand : 'low')} <span class="row-sub">${l ? t('outlets' + l.outletDemand[0].toUpperCase() + l.outletDemand.slice(1)) : ''}</span></span></div>
     <p class="honest" style="margin-top:2px">${t('outletsNote')}</p>
     <div class="kv"><b>Area</b><span>${esc(c.areaLabel || '—')} <span class="honest">· ${t('zoneMonitored')}</span></span></div>
+    ${l && l.tables !== undefined ? `<div class="kv"><b>Tables</b><span>${l.tables} in view <span class="honest">(experimental)</span></span></div>` : ''}
     <div class="kv"><b>${t('address')}</b><span>${esc(c.address)}</span></div>
     <div class="kv"><b>${t('hours')}</b><span>${esc(c.hours || '—')}</span></div>`;
   const body = state.detailTab === 'floorplan' ? floorplanSvg(c) : info;

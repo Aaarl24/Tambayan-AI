@@ -1,0 +1,12 @@
+{
+  "name": "Tambay-AI",
+  "short_name": "Tambay-AI",
+  "description": "Know before you walk — live cafe seat availability",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#15100D",
+  "theme_color": "#15100D",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

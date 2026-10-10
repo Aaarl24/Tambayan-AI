@@ -91,9 +91,15 @@ sees. Shapes are simple rects in the `viewBox` coordinate space.
 
 ## Privacy / rules that must hold
 
-- Only `branch`, `vacant`, `occupied`, `laptops` are accepted. Anything
-  else → `400`. Bodies over 1 KB → `413`.
-- Payloads from the phone are under 100 bytes (test enforces).
+- Only `branch`, `vacant`, `occupied`, `laptops` plus two documented
+  optional extras are accepted — anything else → `400`; bodies over 1 KB → `413`:
+  - `tables` — integer 0-999, dining-table count (**experimental**;
+    the model's 10-detection cap means tables compete with chairs/people).
+  - `grid` — exactly 8 hex chars: a 4×4 coarse grid of the camera view,
+    2 bits per cell (0 none / 1 free chair / 2 taken). It is **not** an
+    image and cannot be turned into one; the floor plan just shades cells.
+- Payloads from the phone are under 100 bytes (test enforces; `branch`
+  is shortened automatically when `grid`/`tables` are present).
 - No images, no accounts, no history, no database. In-memory latest
   reading per cafe only.
 - Readings go **stale** at 90 s and are dropped after 10 min.

@@ -15,7 +15,10 @@ const DROP_AFTER_MS = 10 * 60 * 1000; // readings older than 10min are dropped
 const MAX_SYNC_BYTES = 1024; // spec: 1 KB limit; real payloads are <100 bytes
 const BRANCH_MAX_LEN = 24; // matches buildPayload() in ../src/cloud.ts
 // The only fields a sensor may ever send. Strict: anything else => 400.
-const SYNC_KEYS = new Set(['branch', 'vacant', 'occupied', 'laptops']);
+// `tables` (experimental count) and `grid` (8-hex seat grid — see README,
+// NOT an image) are the documented optional extras.
+const SYNC_KEYS = new Set(['branch', 'vacant', 'occupied', 'laptops', 'tables', 'grid']);
+const GRID_RE = /^[0-9a-fA-F]{8}$/;
 
 // ---------------------------------------------------------------------------
 // Telemetry rules — keep in sync with ../src/telemetry.ts (same thresholds).
@@ -67,6 +70,14 @@ function validateSync(p) {
       return `${k} must be a number 0-999`;
     }
   }
+  if (p.tables !== undefined) {
+    if (typeof p.tables !== 'number' || !Number.isFinite(p.tables) || p.tables < 0 || p.tables > 999) {
+      return 'tables must be a number 0-999';
+    }
+  }
+  if (p.grid !== undefined && (typeof p.grid !== 'string' || !GRID_RE.test(p.grid))) {
+    return 'grid must be exactly 8 hex characters';
+  }
   return null;
 }
 
@@ -116,6 +127,8 @@ function createServer() {
       vacant: r.vacant,
       occupied: r.occupied,
       laptops: r.laptops,
+      ...(r.tables !== undefined ? { tables: r.tables } : {}),
+      ...(r.grid !== undefined ? { grid: r.grid } : {}),
       occupancyPct: t.occupancyPct,
       availability: t.availability,
       outletDemand: t.outletDemand,
@@ -160,6 +173,8 @@ function createServer() {
           vacant: Math.trunc(p.vacant),
           occupied: Math.trunc(p.occupied),
           laptops: Math.trunc(p.laptops),
+          ...(p.tables !== undefined ? { tables: Math.trunc(p.tables) } : {}),
+          ...(p.grid !== undefined ? { grid: p.grid.toLowerCase() } : {}),
           at: Date.now(),
         };
         readings.set(entry.branch, entry);
