@@ -158,8 +158,16 @@ function renderPins() {
 const pulseSet = new Set();
 
 // ---------- bottom sheet ----------
-const SNAPS = { peek: 168, half: () => innerHeight * 0.55, full: () => innerHeight * 0.92 };
+// Snap heights. "peek" hugs the card's measured height so the minimum is
+// truly minimum; half and full are viewport fractions.
+let peekPx = 170;
+const SNAPS = { peek: () => peekPx, half: () => innerHeight * 0.55, full: () => innerHeight * 0.92 };
 const snapPx = (k) => (typeof SNAPS[k] === 'function' ? SNAPS[k]() : SNAPS[k]);
+function measurePeek() {
+  const grab = el('grab').offsetHeight || 26;
+  peekPx = Math.min(innerHeight * 0.45, Math.max(120, el('sheetBody').scrollHeight + grab));
+  if (state.snap === 'peek') setSnap('peek');
+}
 function setSnap(k) {
   state.snap = k;
   const px = Math.min(snapPx(k), innerHeight - 60);
@@ -170,7 +178,7 @@ function setSnap(k) {
 function initDrag() {
   const grab = el('grab'); let startY = 0, startH = 0, dragging = false;
   const move = (y) => {
-    const h = Math.max(SNAPS.peek, Math.min(innerHeight - 40, startH + (startY - y)));
+    const h = Math.max(snapPx('peek'), Math.min(innerHeight - 40, startH + (startY - y)));
     el('sheet').style.height = h + 'px';
     document.documentElement.style.setProperty('--sheet-h', h + 'px');
     return h;
@@ -356,6 +364,7 @@ function renderSheet() {
   if (state.snap === 'peek') {
     const c = sel || bestPick();
     body.innerHTML = `<div class="sect">${sel ? esc(sel.name) : t('bestPick')}</div>` + pickCardHtml(c, !sel);
+    requestAnimationFrame(measurePeek);
     return;
   }
   const list = ranked();
@@ -453,9 +462,9 @@ async function boot() {
   };
 
   el('sheetBody').addEventListener('click', (e) => {
-    const open = e.target.closest('[data-open]'); if (open) return selectCafe(open.dataset.open);
+    const cardEl = e.target.closest('[data-open]'); if (cardEl) return selectCafe(cardEl.dataset.open);
     const dir = e.target.closest('[data-dir]');
-    if (dir) { const c = state.cafes.find((x) => x.id === dir.dataset.dir); if (c) open(`https://www.google.com/maps/dir/?api=1&destination=${c.lat},${c.lng}&travelmode=walking`, '_blank'); return; }
+    if (dir) { const c = state.cafes.find((x) => x.id === dir.dataset.dir); if (c) window.open(`https://www.google.com/maps/dir/?api=1&destination=${c.lat},${c.lng}&travelmode=walking`, '_blank'); return; }
     const share = e.target.closest('[data-share]');
     if (share) { const u = `${location.origin}/#/cafe/${share.dataset.share}`; navigator.clipboard?.writeText(u).then(() => toast(t('copied'))); return; }
     const tab = e.target.closest('[data-tab]');
