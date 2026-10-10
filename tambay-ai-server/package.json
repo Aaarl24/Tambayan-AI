@@ -1,0 +1,15 @@
+{
+  "name": "tambay-ai-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Anonymized seat-count ingest + live student viewer for Tambay-AI",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "simulate": "node simulate.js",
+    "test": "node --test test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
