@@ -3,11 +3,13 @@
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
+    "@react-native-async-storage/async-storage": "2.2.0",
     "@shopify/react-native-skia": "2.6.2",
     "babel-preset-expo": "~57.0.0",
     "expo": "~57.0.27",
     "expo-build-properties": "~57.0.22",
     "expo-dev-client": "~57.0.19",
+    "expo-keep-awake": "~57.0.2",
     "expo-status-bar": "~57.0.1",
     "expo-system-ui": "~57.0.4",
     "nativewind": "^4.2.7",

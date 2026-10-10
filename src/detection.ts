@@ -123,9 +123,10 @@ export function computeCounts(detections: Detection[]): {
 }
 
 /**
- * Maps a normalized box to canvas pixels, replicating the Camera's
- * resizeMode="cover": the frame is scaled uniformly until it fills the view,
- * and the overflow is cropped equally on both sides.
+ * Maps a normalized box to canvas pixels. The camera view and the Skia
+ * canvas are sized to the *processed frame's* aspect ratio (see App.tsx),
+ * so this is a plain scale-1 mapping — no cover-crop math, and letterbox
+ * alignment errors are impossible by construction.
  */
 export function mapToScreen(
   d: Detection,
@@ -134,15 +135,12 @@ export function mapToScreen(
   viewW: number,
   viewH: number
 ): { x: number; y: number; width: number; height: number } {
-  const scale = Math.max(viewW / frameW, viewH / frameH);
-  const dispW = frameW * scale;
-  const dispH = frameH * scale;
-  const offsetX = (viewW - dispW) / 2;
-  const offsetY = (viewH - dispH) / 2;
+  const scaleX = viewW / frameW;
+  const scaleY = viewH / frameH;
   return {
-    x: d.x * dispW + offsetX,
-    y: d.y * dispH + offsetY,
-    width: d.w * dispW,
-    height: d.h * dispH,
+    x: d.x * scaleX,
+    y: d.y * scaleY,
+    width: d.w * scaleX,
+    height: d.h * scaleY,
   };
 }
