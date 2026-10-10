@@ -36,13 +36,15 @@ function statusLabel(s) {
   return { available: t('statusAvailable'), filling: t('statusFilling'), full: t('statusFull'),
     offline: t('statusOffline'), notlive: t('statusNotLive'), none: t('statusFull') }[s] || s;
 }
-function distM(c) {
-  if (!state.userLoc) return null;
-  const [a, b] = [state.userLoc, c];
+function hav(a, b) {
   const R = 6371000, rad = Math.PI / 180;
   const dLat = (b.lat - a.lat) * rad, dLng = (b.lng - a.lng) * rad;
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(h));
+}
+function distM(c) {
+  if (!state.userLoc) return null;
+  return hav(state.userLoc, c);
 }
 function walkMin(c) { const d = distM(c); return d == null ? null : Math.max(1, Math.round((d / 1000 / WALK_KMH) * 60)); }
 
@@ -166,8 +168,52 @@ const ROUTE_MODES = [
   { id: 'walk', icon: '🚶', osrm: 'foot', kmh: 4.5 },
   { id: 'bike', icon: '🚲', osrm: 'cycling', kmh: 15 },
   { id: 'car', icon: '🚗', osrm: 'driving', kmh: 25 },
-  { id: 'transit', icon: '🚆', osrm: null, kmh: 30 }, // no transit routing on OSRM — estimate only
+  { id: 'transit', icon: '🚆', osrm: null, kmh: 4.5 },
 ];
+// LRT-1 stations along the Taft Ave corridor (approx coords, N -> S).
+// Transit mode = walk to nearest station -> ride the line -> walk to cafe.
+const LRT1 = [
+  [14.6185, 120.9813], // Carriedo
+  [14.5928, 120.9816], // Central Terminal
+  [14.5824, 120.9845], // United Nations
+  [14.5766, 120.9881], // Pedro Gil
+  [14.5701, 120.9916], // Quirino
+  [14.5634, 120.9947], // Vito Cruz
+  [14.5543, 120.9970], // Gil Puyat
+  [14.5478, 120.9986], // Libertad
+];
+const RAIL_KMH = 40, BOARDING_S = 150;
+function nearestStation(p) {
+  let bi = 0, bd = Infinity;
+  LRT1.forEach(([lat, lng], i) => { const d = hav(p, { lat, lng }); if (d < bd) { bd = d; bi = i; } });
+  return { i: bi, dist: bd };
+}
+// Rail-assisted route: walk -> LRT-1 -> walk. Returns null when riding the
+// line makes no sense (same station for origin and destination).
+async function transitRoute(from, c) {
+  const s1 = nearestStation(from), s2 = nearestStation(c);
+  if (s1.i === s2.i) return null;
+  const st1 = { lat: LRT1[s1.i][0], lng: LRT1[s1.i][1] };
+  const st2 = { lat: LRT1[s2.i][0], lng: LRT1[s2.i][1] };
+  const walk = { osrm: 'foot' };
+  const legA = await routeFetch(walk, from, st1);
+  const legB = await routeFetch(walk, st2, c);
+  const legACoords = legA ? legA.coords : [[from.lat, from.lng], [st1.lat, st1.lng]];
+  const legBCoords = legB ? legB.coords : [[st2.lat, st2.lng], [c.lat, c.lng]];
+  const legADist = legA ? legA.dist : s1.dist;
+  const legBDist = legB ? legB.dist : s2.dist;
+  const [lo, hi] = s1.i < s2.i ? [s1.i, s2.i] : [s2.i, s1.i];
+  let railPts = LRT1.slice(lo, hi + 1).map(([lat, lng]) => [lat, lng]);
+  if (s1.i > s2.i) railPts = railPts.reverse();
+  const railDist = railPts.slice(1).reduce((d, p, i) => d + hav({ lat: railPts[i][0], lng: railPts[i][1] }, { lat: p[0], lng: p[1] }), 0);
+  const walkSecs = ((legADist + legBDist) / 1000 / ROUTE_MODES[0].kmh) * 3600;
+  return {
+    legs: [legACoords, railPts, legBCoords],
+    dist: legADist + railDist + legBDist,
+    secs: walkSecs + (railDist / 1000 / RAIL_KMH) * 3600 + BOARDING_S,
+    via: 'LRT-1',
+  };
+}
 state.routeMode = 'walk';
 function clearRoute() {
   if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
@@ -215,22 +261,38 @@ async function startDirections(c) {
   if (!ok) { toast(t('locationNeeded')); selectCafe(c.id, true); return; }
   const mode = ROUTE_MODES.find((m) => m.id === state.routeMode) || ROUTE_MODES[0];
   clearRoute();
-  const routed = await routeFetch(mode, state.userLoc, c);
-  const dashed = !routed;
-  const coords = routed ? routed.coords : [[state.userLoc.lat, state.userLoc.lng], [c.lat, c.lng]];
-  const dist = routed ? routed.dist : distM(c);
-  const secs = routed ? routed.secs : (dist / 1000 / mode.kmh) * 3600;
-  routeLayer = L.polyline(coords, {
-    color: '#0891b2', weight: 5, opacity: 0.9,
-    ...(dashed ? { dashArray: '6 9' } : {}),
-  }).addTo(map);
+  let dist, secs, via = '', estimated = false;
+  if (mode.id === 'transit') {
+    const tr = await transitRoute(state.userLoc, c);
+    if (tr) {
+      const [a, rail, b] = tr.legs;
+      routeLayer = L.layerGroup([
+        L.polyline(a, { color: '#0891b2', weight: 4, opacity: 0.8, dashArray: '4 8' }),
+        L.polyline(rail, { color: '#8b5cf6', weight: 6, opacity: 0.95 }),
+        L.polyline(b, { color: '#0891b2', weight: 4, opacity: 0.8, dashArray: '4 8' }),
+      ]).addTo(map);
+      dist = tr.dist; secs = tr.secs; via = ` via ${tr.via}`; estimated = true;
+    } else estimated = true;
+  }
+  if (!routeLayer) {
+    const routed = await routeFetch(mode, state.userLoc, c);
+    const dashed = !routed;
+    const coords = routed ? routed.coords : [[state.userLoc.lat, state.userLoc.lng], [c.lat, c.lng]];
+    dist = routed ? routed.dist : distM(c);
+    secs = routed ? routed.secs : (dist / 1000 / mode.kmh) * 3600;
+    estimated = dashed;
+    routeLayer = L.polyline(coords, {
+      color: '#0891b2', weight: 5, opacity: 0.9,
+      ...(dashed ? { dashArray: '6 9' } : {}),
+    }).addTo(map);
+  }
   const mins = Math.max(1, Math.round(secs / 60));
   const km = dist >= 1000 ? `${(dist / 1000).toFixed(1)} km` : `${Math.round(dist)} m`;
   const chip = el('routeChip');
   chip.innerHTML =
     `<div class="modes">` +
     ROUTE_MODES.map((m) => `<button class="mode ${m.id === mode.id ? 'on' : ''}" data-mode="${m.id}" aria-label="${m.id}">${m.icon}</button>`).join('') +
-    `</div><span class="eta">~${mins} min</span><span>${km} → ${esc(c.name)}${dashed ? ' (est.)' : ''}</span><button id="routeClear" aria-label="${t('close')}">✕</button>`;
+    `</div><span class="eta">~${mins} min</span><span>${km}${via} → ${esc(c.name)}${estimated ? ' (est.)' : ''}</span><button id="routeClear" aria-label="${t('close')}">✕</button>`;
   chip.classList.add('show');
   chip.querySelectorAll('[data-mode]').forEach((b) => {
     b.onclick = () => { state.routeMode = b.dataset.mode; void startDirections(state.routeCafe); };
