@@ -108,8 +108,7 @@ button { font: inherit; cursor: pointer; }
 /* ---------- bottom sheet ---------- */
 #sheet {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 15;
-  background: var(--card); border-radius: 24px 24px 0 0;
-  border-top: 1px solid var(--line);
+  background: var(--paper); border-radius: 24px 24px 0 0;
   box-shadow: var(--sheet-shadow);
   height: var(--sheet-h, 170px);
   transition: height .32s cubic-bezier(.22, .9, .3, 1);
@@ -117,23 +116,19 @@ button { font: inherit; cursor: pointer; }
   touch-action: none;
   max-width: 640px; margin: 0 auto;
 }
-@media (prefers-color-scheme: dark) { #sheet { background: #1d1712; } }
-@media (min-width: 640px) { #sheet { left: 12px; bottom: 12px; border-radius: 24px; margin: 0; width: 420px; border: 1px solid var(--line); } }
+@media (min-width: 640px) { #sheet { left: 12px; bottom: 12px; border-radius: 24px; margin: 0; width: 420px; } }
 #grab {
-  flex: 0 0 auto; padding: 10px 0 8px; display: flex; justify-content: center;
+  flex: 0 0 auto; padding: 10px 0 6px; display: flex; justify-content: center;
   cursor: grab; touch-action: none;
 }
-#grab::before { content: ''; width: 48px; height: 5px; border-radius: 3px; background: var(--muted); opacity: .55; }
-#grab:active { cursor: grabbing; }
-#grab:active::before { background: var(--ink); opacity: 1; }
+#grab::before { content: ''; width: 40px; height: 5px; border-radius: 3px; background: var(--line); }
 #sheetBody { flex: 1; overflow-y: auto; padding: 0 16px calc(16px + env(safe-area-inset-bottom)); touch-action: pan-y; }
 
 /* peek card / list rows */
 .pickcard, .row {
-  background: var(--paper); border-radius: var(--radius); padding: 14px 16px;
+  background: var(--card); border-radius: var(--radius); padding: 14px 16px;
   border: 1px solid var(--line);
 }
-@media (prefers-color-scheme: dark) { .pickcard, .row { background: var(--card); } }
 .row { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; text-align: left; width: 100%; }
 .row-main { flex: 1; min-width: 0; }
 .row-name { font-weight: 700; font-size: .95rem; display: flex; gap: 6px; align-items: center; }
@@ -189,6 +184,22 @@ button { font: inherit; cursor: pointer; }
 #empty h2 { color: var(--ink); font-size: 1.4rem; }
 
 .loc-marker { background: var(--laptop); border: 3px solid #fff; border-radius: 50%; width: 16px; height: 16px; box-shadow: 0 0 0 3px rgba(8,145,178,.35); }
+
+/* walking route chip shown while directions are active */
+#routeChip {
+  position: fixed; left: 50%; transform: translateX(-50%);
+  top: max(64px, calc(env(safe-area-inset-top) + 56px)); z-index: 12;
+  display: none; align-items: center; gap: 8px;
+  background: var(--card); border: 1px solid var(--line); border-radius: 999px;
+  padding: 8px 8px 8px 14px; font-size: .82rem; font-weight: 600;
+  box-shadow: 0 4px 14px rgba(0,0,0,.18); white-space: nowrap; max-width: 92vw;
+}
+#routeChip.show { display: flex; }
+#routeChip .eta { color: var(--laptop); font-weight: 800; }
+#routeChip button {
+  border: none; background: var(--card-2); color: var(--ink);
+  border-radius: 999px; width: 26px; height: 26px; font-weight: 700;
+}
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }

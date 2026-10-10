@@ -157,6 +157,69 @@ function renderPins() {
 }
 const pulseSet = new Set();
 
+// ---------- in-app walking directions ----------
+// Route layer drawn on the map itself — the student never leaves Tambay.
+// OSRM's free demo endpoint provides the walking path; a straight dashed
+// line + time estimate is the offline fallback. No API key involved.
+let routeLayer = null;
+function clearRoute() {
+  if (routeLayer) { map.removeLayer(routeLayer); routeLayer = null; }
+  el('routeChip').classList.remove('show');
+}
+function locate() {
+  return new Promise((res) => {
+    navigator.geolocation?.getCurrentPosition(
+      (p) => {
+        state.userLoc = { lat: p.coords.latitude, lng: p.coords.longitude };
+        if (!userMarker) {
+          userMarker = L.marker([p.coords.latitude, p.coords.longitude], {
+            icon: L.divIcon({ className: '', html: '<div class="loc-marker"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }),
+            interactive: false,
+          }).addTo(map);
+        } else userMarker.setLatLng([p.coords.latitude, p.coords.longitude]);
+        res(true);
+      },
+      () => res(false),
+      { timeout: 8000 }
+    );
+  });
+}
+async function startDirections(c) {
+  let ok = !!state.userLoc;
+  if (!ok) { toast(t('locatingYou')); ok = await locate(); renderAll(); }
+  if (!ok) { toast(t('locationNeeded')); selectCafe(c.id, true); return; }
+  clearRoute();
+  let coords = null, dist = null, secs = null;
+  try {
+    const r = await fetch(
+      `https://router.project-osrm.org/route/v1/foot/${state.userLoc.lng},${state.userLoc.lat};${c.lng},${c.lat}?overview=full&geometries=geojson`
+    );
+    const j = await r.json();
+    const route = j.routes && j.routes[0];
+    if (route) {
+      coords = route.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+      dist = route.distance; secs = route.duration;
+    }
+  } catch { /* offline — straight-line fallback below */ }
+  const dashed = !coords;
+  if (!coords) {
+    coords = [[state.userLoc.lat, state.userLoc.lng], [c.lat, c.lng]];
+    dist = distM(c); secs = (dist / 1000 / WALK_KMH) * 3600;
+  }
+  routeLayer = L.polyline(coords, {
+    color: '#0891b2', weight: 5, opacity: 0.9,
+    ...(dashed ? { dashArray: '6 9' } : {}),
+  }).addTo(map);
+  const mins = Math.max(1, Math.round(secs / 60));
+  const km = dist >= 1000 ? `${(dist / 1000).toFixed(1)} km` : `${Math.round(dist)} m`;
+  const chip = el('routeChip');
+  chip.innerHTML = `<span class="eta">~${mins} ${t('walkEst')}</span><span>${km} → ${esc(c.name)}</span><button id="routeClear" aria-label="${t('close')}">✕</button>`;
+  chip.classList.add('show');
+  el('routeClear').onclick = clearRoute;
+  map.fitBounds(routeLayer.getBounds().pad(0.25));
+  setSnap('peek');
+}
+
 // ---------- bottom sheet ----------
 // Snap heights. "peek" hugs the card's measured height so the minimum is
 // truly minimum; half and full are viewport fractions.
@@ -436,17 +499,10 @@ async function boot() {
   el('findBtn').textContent = t('findSeat');
   el('findBtn').onclick = () => { const c = bestPick(); if (c) selectCafe(c.id, true); else toast(t('emptyBody')); };
   el('locBtn').textContent = '📍 ' + t('useMyLocation');
-  el('locBtn').onclick = () => {
-    navigator.geolocation?.getCurrentPosition(
-      (p) => {
-        state.userLoc = { lat: p.coords.latitude, lng: p.coords.longitude };
-        if (!userMarker) { userMarker = L.marker([p.coords.latitude, p.coords.longitude], { icon: L.divIcon({ className: '', html: '<div class="loc-marker"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }), interactive: false }).addTo(map); }
-        else userMarker.setLatLng([p.coords.latitude, p.coords.longitude]);
-        renderAll();
-      },
-      () => toast('Location unavailable'),
-      { timeout: 8000 }
-    );
+  el('locBtn').onclick = async () => {
+    const ok = await locate();
+    if (!ok) toast(t('locationNeeded'));
+    renderAll();
   };
   el('langBtn').textContent = t('langToggle');
   el('langBtn').onclick = () => { window.LANG = window.LANG === 'en' ? 'fil' : 'en'; localStorage.setItem('tambay-lang', window.LANG); location.reload(); };
@@ -464,7 +520,7 @@ async function boot() {
   el('sheetBody').addEventListener('click', (e) => {
     const cardEl = e.target.closest('[data-open]'); if (cardEl) return selectCafe(cardEl.dataset.open);
     const dir = e.target.closest('[data-dir]');
-    if (dir) { const c = state.cafes.find((x) => x.id === dir.dataset.dir); if (c) window.open(`https://www.google.com/maps/dir/?api=1&destination=${c.lat},${c.lng}&travelmode=walking`, '_blank'); return; }
+    if (dir) { const c = state.cafes.find((x) => x.id === dir.dataset.dir); if (c) void startDirections(c); return; }
     const share = e.target.closest('[data-share]');
     if (share) { const u = `${location.origin}/#/cafe/${share.dataset.share}`; navigator.clipboard?.writeText(u).then(() => toast(t('copied'))); return; }
     const tab = e.target.closest('[data-tab]');

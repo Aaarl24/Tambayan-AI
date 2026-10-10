@@ -53,6 +53,8 @@ window.STRINGS = {
     langToggle: 'FIL',
     notLiveYetHint: 'No sensor has reported yet',
     offlineHint: 'Sensor quiet for a while',
+    locatingYou: 'Locating you…',
+    locationNeeded: 'Location unavailable — enable it for directions',
     close: 'Close',
   },
   fil: {
@@ -107,6 +109,8 @@ window.STRINGS = {
     langToggle: 'EN',
     notLiveYetHint: 'Wala pang nag-uulat na sensor',
     offlineHint: 'Matagal nang tahimik ang sensor',
+    locatingYou: 'Hinahanap ka…',
+    locationNeeded: 'Walang lokasyon — i-enable para sa directions',
     close: 'Isara',
   },
 };
